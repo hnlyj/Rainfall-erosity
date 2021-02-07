@@ -8,7 +8,8 @@ import time
 # from Mkdir import *
 import traceback
 import queue
-
+import glob
+import re
 alive = multiprocessing.Value('b', False)
 
 
@@ -51,8 +52,6 @@ def judge(rainfall_M, Time):  # 筛选出单个点 大于0的数据 时间作为
             TimeRT.append(Time[i - 1])
     pd_rainfall = pd.Series(rainfallRT, index=TimeRT, dtype=np.float32)
     return pd_rainfall, rainfall_M[0]
-
-
 def erosionEvent(pd_rainfall, index, q):  # 处理Series结构的月数据 pd_rainfall 已剔除未降雨的时间
     Times_temp = datetime.datetime.strptime('201401010030', "%Y%m%d%H%M")
     # 单次降雨侵蚀事件经历的时间
@@ -91,6 +90,7 @@ def erosionEvent(pd_rainfall, index, q):  # 处理Series结构的月数据 pd_ra
                 duration.append(duration_single)
                 I30.append(I_np.max())
                 E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))*I_np
+                # E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))
                 Energy.append(sum(E))
                 # print(I)
             elif I_np.sum() > 12.7:
@@ -98,6 +98,7 @@ def erosionEvent(pd_rainfall, index, q):  # 处理Series结构的月数据 pd_ra
                 duration.append(duration_single)
                 I30.append(I_np.max())
                 E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np))) * I_np
+                # E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))
                 Energy.append(sum(E))
                 # print(I)
             I.clear()
@@ -111,6 +112,8 @@ def erosionEvent(pd_rainfall, index, q):  # 处理Series结构的月数据 pd_ra
             duration.append(duration_single)
             I30.append(I_np.max())
             E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np))) * I_np
+            # E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))
+
             Energy.append(sum(E))
             # print(I)
         elif I_np.sum() > 12.7:
@@ -118,15 +121,22 @@ def erosionEvent(pd_rainfall, index, q):  # 处理Series结构的月数据 pd_ra
             duration.append(duration_single)
             I30.append(I_np.max())
             E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np))) * I_np
+            # E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))
             Energy.append(sum(E))
     # 有结果的 生成DataFrame结构 节省计算资源
     if len(duration):
         single_M = pd.DataFrame({'duration': pd.Series(duration),
                                  'Energy': pd.Series(Energy),
                                  'I30': pd.Series(I30)})
-        # print(single_M)
         # 计算单点的侵蚀结果
         result = np.sum(single_M['Energy'] * single_M['I30'], axis=0)
+        # if len(E)!=len(I_np):
+        #     print('E array:',E)
+        #     # print(E/I_np)
+        #     print('I_np array:',I_np)
+        #     print(len(E),len(I_np))
+        if result>1000:
+            print(single_M)
         ind_val = (index, result)  # 存索引和计算结果   注意 result是float  索引是整型 导致整型强制转化
         q.put(ind_val)
 
@@ -136,8 +146,9 @@ def read_M(path_D, Xsize=700, Ysize=900):
     data = np.zeros((48, Xsize, Ysize), dtype=np.float32)
     count = 0
     # 将一个月的降水数据写入矩阵
-    for fileName in os.listdir(path_D):
-        band_path = os.path.join(path_D, fileName)
+    for band_path in sorted(glob.glob(os.path.join(path_D,'*'))):
+        # band_path = os.path.join(path_D, fileName)
+        print(band_path)
         in_ds = gdal.Open(band_path)
         in_data = in_ds.ReadAsArray()
         # tiff中的nodata为None
@@ -272,8 +283,14 @@ if __name__ == '__main__':
                 x=bytes(path_D,encoding='utf-8')
                 Bytepath_D.value=x
                 Time = []
+                '''
                 for fileName in os.listdir(path_D):  # 先把日期列表读取
                     Time.append(fileName[7:-4])
+                '''
+                pattern='\d{12}'
+                for path in sorted(glob.glob(os.path.join(path_D,'*'))):
+                    time=re.search(pattern,path)
+                    Time.append(time.group())
                 front_func = multiprocessing.Process(target=mainLoop, args=(path_D, q1))  # 前台函数
                 front_func.start()
                 alive.value = True
