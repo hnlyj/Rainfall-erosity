@@ -33,15 +33,6 @@ def mkdir(path):
         print('目录已存在')
 
 
-def MKDIR(path, year, dateList):
-    '''
-    建立的从年到月到日的文件夹
-    '''
-    for i in dateList:
-        path_MD = path + '\\' + year + '\\' + i[0:6] + '\\' + i
-        mkdir(path_MD)
-
-
 def judge(rainfall_M, Time):  # 筛选出单个点 大于0的数据 时间作为index 生成series结构
     TimeRT = []
     rainfallRT = []
@@ -52,16 +43,13 @@ def judge(rainfall_M, Time):  # 筛选出单个点 大于0的数据 时间作为
             TimeRT.append(Time[i - 1])
     pd_rainfall = pd.Series(rainfallRT, index=TimeRT, dtype=np.float32)
     return pd_rainfall, rainfall_M[0]
+
+
 def erosionEvent(pd_rainfall, index, q):  # 处理Series结构的月数据 pd_rainfall 已剔除未降雨的时间
-    Times_temp = datetime.datetime.strptime('201401010030', "%Y%m%d%H%M")
-    # 单次降雨侵蚀事件经历的时间
-    duration = []
-    Energy = []
-    # 存储单次侵蚀事件的降雨强度 筛选出最大的I
+    Times_temp = datetime.datetime.strptime('190001010030', "%Y%m%d%H%M")
     I = []
-    # 存储最大降雨强度
-    I30 = []
     end = True
+    EventNumber = 0
     # i为降雨日期 v是降雨量
     for i, v in pd_rainfall.items():
         Times_current = datetime.datetime.strptime(i, "%Y%m%d%H%M")
@@ -85,59 +73,21 @@ def erosionEvent(pd_rainfall, index, q):  # 处理Series结构的月数据 pd_ra
             # 清算最后一次的I数组 判断是否记录侵蚀
             I_np = np.array(I, dtype=np.float32)
             if I_np[I_np > 6.5].size != 0 and I_np.sum() < 12.7:
-                # print(I_np)
-                duration_single = I_np.size * 0.5
-                duration.append(duration_single)
-                I30.append(I_np.max())
-                E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))*I_np
-                # E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))
-                Energy.append(sum(E))
-                # print(I)
+                EventNumber += 1
             elif I_np.sum() > 12.7:
-                duration_single = I_np.size * 0.5
-                duration.append(duration_single)
-                I30.append(I_np.max())
-                E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np))) * I_np
-                # E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))
-                Energy.append(sum(E))
-                # print(I)
+                EventNumber += 1
             I.clear()
             end = True
             I.append(v)
-    if len(I)>0:
+    if len(I) > 0:
         I_np = np.array(I, dtype=np.float32)
         if I_np[I_np > 6.5].size != 0 and I_np.sum() < 12.7:
-            # print(I_np)
-            duration_single = I_np.size * 0.5
-            duration.append(duration_single)
-            I30.append(I_np.max())
-            E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np))) * I_np
-            # E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))
-
-            Energy.append(sum(E))
-            # print(I)
+            EventNumber += 1
         elif I_np.sum() > 12.7:
-            duration_single = I_np.size * 0.5
-            duration.append(duration_single)
-            I30.append(I_np.max())
-            E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np))) * I_np
-            # E = (0.29 * (1 - 0.72 * np.exp(-0.05 * 2 * I_np)))
-            Energy.append(sum(E))
-    # 有结果的 生成DataFrame结构 节省计算资源
-    if len(duration):
-        single_M = pd.DataFrame({'duration': pd.Series(duration),
-                                 'Energy': pd.Series(Energy),
-                                 'I30': pd.Series(I30)})
-        # 计算单点的侵蚀结果
-        result = np.sum(single_M['Energy'] * single_M['I30'], axis=0)
-        # if len(E)!=len(I_np):
-        #     print('E array:',E)
-        #     # print(E/I_np)
-        #     print('I_np array:',I_np)
-        #     print(len(E),len(I_np))
-        if result>1000:
-            print(single_M)
-        ind_val = (index, result)  # 存索引和计算结果   注意 result是float  索引是整型 导致整型强制转化
+            EventNumber += 1
+    if EventNumber > 0:
+        # 存索引和计算结果   注意 result是float  索引是整型 导致整型强制转化
+        ind_val = (index, EventNumber)
         q.put(ind_val)
 
 
@@ -146,9 +96,8 @@ def read_M(path_D, Xsize=700, Ysize=900):
     data = np.zeros((48, Xsize, Ysize), dtype=np.float32)
     count = 0
     # 将一个月的降水数据写入矩阵
-    for band_path in sorted(glob.glob(os.path.join(path_D,'*'))):
+    for band_path in sorted(glob.glob(os.path.join(path_D, '*'))):
         # band_path = os.path.join(path_D, fileName)
-        print(band_path)
         in_ds = gdal.Open(band_path)
         in_data = in_ds.ReadAsArray()
         # tiff中的nodata为None
@@ -197,7 +146,7 @@ def WriteR(q, alive, saveEvent, Bytepath_D, DayFileName, endEvent):
     data = np.zeros((700, 900), dtype=np.float32)
     while alive.value:
         # 取索引和计算的结果 采用元组存储
-        path_D=str(Bytepath_D.value,encoding='utf-8')
+        path_D = str(Bytepath_D.value, encoding='utf-8')
         try:
             ind_val = q.get(timeout=0.5)
             # print(ind_val,data.shape)
@@ -207,13 +156,12 @@ def WriteR(q, alive, saveEvent, Bytepath_D, DayFileName, endEvent):
             if saveEvent.is_set():
                 saveEvent.clear()
                 print(data.max())
-                infoPath = os.path.join(path_D, os.listdir(path_D)[0])
-                in_ds = gdal.Open(infoPath)
-                in_band = in_ds.GetRasterBand(1)
-                out_path = path_D.replace('AIM', 'Output')
+                out_path = path_D.replace('AIM', 'Output\侵蚀事件数量')
                 mkdir(out_path)
-                fileNameRE = 'RE_{}.tif'.format(str(DayFileName.value,encoding='utf-8'))  # 结果文件名称
-                make_raster(in_ds, os.path.join(out_path, fileNameRE), data, in_band.DataType, endEvent, nodata=np.nan)
+                fileNameRE = 'RE_{}'.format(
+                    str(DayFileName.value, encoding='utf-8'))  # 结果文件名称
+                np.save(os.path.join(out_path, fileNameRE), data)
+                endEvent.set()
                 data = np.zeros((700, 900), dtype=np.float32)
 
 
@@ -263,40 +211,43 @@ if __name__ == '__main__':
     path = r'E:\Project Data\Rainfall\AIM'
     # path = input('请输入路径（年文件夹的上层路径）:')
     print('此机CPU {}核'.format(str(multiprocessing.cpu_count())))
-    processNumber = input('请输入处理数据的子进程数：')
-    processNumber = int(processNumber)
+    # processNumber = input('请输入处理数据的子进程数：')
+    # processNumber = int(processNumber)
+    processNumber = 2
     CreateProcess = True
+
     saveEvent = multiprocessing.Event()
     endEvent = multiprocessing.Event()  # 确保保存影像后再进行下一次循环
-    DayFileName=multiprocessing.Array('c',100)
-    Bytepath_D=multiprocessing.sharedctypes.Array('c',100)
+    DayFileName = multiprocessing.Array('c', 100)
+    Bytepath_D = multiprocessing.sharedctypes.Array('c', 100)
+
     for i in os.listdir(path):
+        if i != '2015':
+            continue
         path_Y = os.path.join(path, i)
         for j in os.listdir(path_Y):  # 年
             path_M = os.path.join(path_Y, j)  # 月
             for k in os.listdir(path_M):  # 日
-                DayFileName.value=bytes(k,encoding='utf-8')
+                DayFileName.value = bytes(k, encoding='utf-8')
                 endEvent.clear()
                 print('{}处理中，请等待！！'.format(k))
                 # Writedata=np.zeros((700,900),dtype=np.float32)  #计算日降雨侵蚀因子 每日生成一个存储侵蚀结果的矩阵
                 path_D = os.path.join(path_M, k)
-                x=bytes(path_D,encoding='utf-8')
-                Bytepath_D.value=x
+                x = bytes(path_D, encoding='utf-8')
+                Bytepath_D.value = x
                 Time = []
-                '''
-                for fileName in os.listdir(path_D):  # 先把日期列表读取
-                    Time.append(fileName[7:-4])
-                '''
-                pattern='\d{12}'
-                for path in sorted(glob.glob(os.path.join(path_D,'*'))):
-                    time=re.search(pattern,path)
-                    Time.append(time.group())
-                front_func = multiprocessing.Process(target=mainLoop, args=(path_D, q1))  # 前台函数
+                pattern = '\d{12}'
+                for path in sorted(glob.glob(os.path.join(path_D, '*'))):
+                    dateTime = re.search(pattern, path)
+                    Time.append(dateTime.group())
+                front_func = multiprocessing.Process(
+                    target=mainLoop, args=(path_D, q1))  # 前台函数
                 front_func.start()
                 alive.value = True
                 if CreateProcess:
                     for i in range(0, processNumber):
-                        back_func = multiprocessing.Process(target=backProcess, args=(q1, q2, Time, alive))  # 后台任务处理队列
+                        back_func = multiprocessing.Process(
+                            target=backProcess, args=(q1, q2, Time, alive))  # 后台任务处理队列
                         back_func.start()
                         block_record.append(back_func)
                     write_func = multiprocessing.Process(target=WriteR,
